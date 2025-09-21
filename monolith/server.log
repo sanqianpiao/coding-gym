@@ -1,0 +1,6 @@
+2025/09/21 16:21:44 Starting Unified Monolith Server...
+2025/09/21 16:21:45 Unified server starting on port 8080
+2025/09/21 16:21:45 Available endpoints:
+2025/09/21 16:21:45   Token Bucket API: /api/bucket/*
+2025/09/21 16:21:45   User Management API: /api/users/*
+2025/09/21 16:21:45   Health: /health
