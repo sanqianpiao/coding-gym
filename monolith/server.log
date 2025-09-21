@@ -4,3 +4,5 @@
 2025/09/21 16:21:45   Token Bucket API: /api/bucket/*
 2025/09/21 16:21:45   User Management API: /api/users/*
 2025/09/21 16:21:45   Health: /health
+2025/09/21 17:43:12 Shutting down server...
+2025/09/21 17:43:12 Server exited

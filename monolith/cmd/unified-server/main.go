@@ -21,6 +21,7 @@ import (
 	// Token Bucket components
 	"monolith/internal/bucket"
 	"monolith/internal/handler"
+	"monolith/internal/middleware"
 )
 
 type UnifiedServer struct {
@@ -61,11 +62,14 @@ func main() {
 	repo := database.NewRepository(db)
 	userService := service.NewUserService(repo, cfg.Kafka.Topic)
 
-	// Initialize Redis Token Bucket components
+	// Initialize Redis Token Bucket components for API usage
 	tb, err := bucket.NewRedisTokenBucket(&bucket.Config{
 		RedisAddr:     getEnv("REDIS_ADDR", "localhost:6379"),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
 		RedisDB:       0,
+		Capacity:      100,             // 100 tokens max for API buckets
+		RefillRate:    10.0,            // 10 tokens per second for API buckets
+		TTL:           5 * time.Minute, // 5 minute TTL for API buckets
 	})
 	if err != nil {
 		log.Fatalf("Failed to initialize token bucket: %v", err)
@@ -74,14 +78,42 @@ func main() {
 
 	bucketHandler := handler.NewHandler(tb)
 
+	// Initialize separate token bucket for rate limiting with different config
+	rateLimitBucket, err := bucket.NewRedisTokenBucket(&bucket.Config{
+		RedisAddr:     getEnv("REDIS_ADDR", "localhost:6379"),
+		RedisPassword: getEnv("REDIS_PASSWORD", ""),
+		RedisDB:       0,
+		Capacity:      10,              // 10 token burst capacity for rate limiting
+		RefillRate:    0.1,             // 0.1 tokens per second (6/minute) for rate limiting - slower refill for testing
+		TTL:           2 * time.Minute, // 2 minute TTL for rate limit buckets
+	})
+	if err != nil {
+		log.Fatalf("Failed to initialize rate limit bucket: %v", err)
+	}
+	defer rateLimitBucket.Close()
+
 	// Create unified server
 	server := &UnifiedServer{
 		userService:   userService,
 		bucketHandler: bucketHandler,
 	}
 
+	// Setup middleware for global rate limiting
+	rateLimitConfig := &middleware.RateLimitConfig{
+		RequestsPerMinute: 6,           // 6 requests per minute per client (0.1/second)
+		BurstSize:         10,          // Allow bursts of 10 requests
+		RefillRate:        time.Minute, // Refill every minute
+	}
+	rateLimitMiddleware := middleware.NewRateLimitMiddleware(rateLimitBucket, rateLimitConfig)
+
 	// Setup routes
 	r := mux.NewRouter()
+
+	// Apply global middleware stack
+	r.Use(middleware.RecoveryMiddleware)
+	r.Use(middleware.LoggingMiddleware)
+	r.Use(middleware.CORSMiddleware)
+	r.Use(rateLimitMiddleware.Handler)
 
 	// Token Bucket API routes (prefix with /api/bucket)
 	bucketAPI := r.PathPrefix("/api/bucket").Subrouter()
